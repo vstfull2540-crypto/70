@@ -1,0 +1,82 @@
+name: Build Windows VST3
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Configure and build VST3 (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Initialize MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+          where.exe cl
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC compiler cl.exe was not found.' }
+
+      - name: Configure with Ninja (not Visual Studio generator)
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
+
+      - name: Build VST3 and Standalone
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target ArmNongMuangAnalyzer_VST3 ArmNongMuangAnalyzer_Standalone --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Compilation failed. See build log above.' }
+
+      - name: Verify generated artifacts
+        shell: pwsh
+        run: |
+          $vst3 = 'build/ArmNongMuangAnalyzer_artefacts/Release/VST3'
+          $standalone = 'build/ArmNongMuangAnalyzer_artefacts/Release/Standalone'
+          if (-not (Test-Path $vst3)) { throw "VST3 output not found: $vst3" }
+          if (-not (Test-Path $standalone)) { throw "Standalone output not found: $standalone" }
+          if (-not (Get-ChildItem $vst3 -Recurse -File)) { throw 'VST3 output is empty.' }
+          if (-not (Get-ChildItem $standalone -Recurse -File)) { throw 'Standalone output is empty.' }
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arm-Nong-Muang-Analyzer-VST3-Windows-x64
+          path: build/ArmNongMuangAnalyzer_artefacts/Release/VST3/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Standalone artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arm-Nong-Muang-Analyzer-Standalone-Windows-x64
+          path: build/ArmNongMuangAnalyzer_artefacts/Release/Standalone/
+          if-no-files-found: error
+          retention-days: 14
